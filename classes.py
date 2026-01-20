@@ -102,14 +102,19 @@ class Hero(arcade.Sprite):
 class Bullet(arcade.Sprite):
     __texture = arcade.load_texture("pictures/photo/missile.png")
 
-    def __init__(self, start_x, start_y, target_x, target_y, speed=800, damage=10):
+    def __init__(self, start_x, start_y, target_x, target_y, speed=800, damage=10, pierce_count=0):
         super().__init__()
         self.texture = self.__texture
         self.center_x = start_x
         self.center_y = start_y
+        self.start_x = start_x
+        self.start_y = start_y
         self.scale = 0.1
         self.speed = speed
         self.damage = damage
+        self.max_distance = 1500  # Максимальная дистанция полёта
+        self.pierce_count = pierce_count  # Сколько врагов может пробить
+        self.pierced_enemies = set()  # Уже пробитые враги (их id)
         
         x_diff = target_x - start_x
         y_diff = target_y - start_y
@@ -120,21 +125,31 @@ class Bullet(arcade.Sprite):
         self.angle = math.degrees(-angle)  # Поворот пули
         
     def update(self, delta_time):
-        # Удаляем пулю, если она ушла за экран
-        if (self.center_x < -100 or self.center_x > SCREEN_WIDTH + 100 or
-            self.center_y < -100 or self.center_y > SCREEN_HEIGHT + 100):
-            self.remove_from_sprite_lists()
-
         self.center_x += self.change_x * delta_time
         self.center_y += self.change_y * delta_time
+        
+        # Удаляем пулю, если она улетела слишком далеко от точки выстрела
+        dist = math.sqrt((self.center_x - self.start_x)**2 + (self.center_y - self.start_y)**2)
+        if dist > self.max_distance:
+            self.remove_from_sprite_lists()
 
 
 class Slime(arcade.Sprite):
-    def __init__(self, x, y, speed=50, damage=10):  # Уменьшил скорость для реалистичности
-        super().__init__(scale=0.1)
-        self.texture = arcade.load_texture("pictures/anim/слизень/slime.png")
+    def __init__(self, x, y, speed=100, damage=10, hp=1):
+        super().__init__(scale=0.3)
+        self.walk_textures = []
+        for i in range(1, 9):
+            self.walk_textures.append(
+                arcade.load_texture(f"pictures/anim/слизень/{i}.png")
+            )
+        self.current_texture = 0
+        self.texture_change_time = 0
+        self.texture_change_delay = 0.12  # секунд на кадр
+        self.texture = self.walk_textures[self.current_texture]
         self.speed = speed
         self.damage = damage
+        self.hp = hp  # Здоровье врага
+        self.max_hp = hp
         self.center_x = x
         self.center_y = y
         
@@ -165,3 +180,161 @@ class Slime(arcade.Sprite):
                 hit_wall_y = arcade.check_for_collision_with_list(self, wall_list)
                 if hit_wall_y:
                     self.center_y = old_y
+
+    def update_animation(self, delta_time: float = 1 / 60):
+        self.texture_change_time += delta_time
+        if self.texture_change_time >= self.texture_change_delay:
+            self.texture_change_time = 0
+            self.current_texture += 1
+            if self.current_texture >= len(self.walk_textures):
+                self.current_texture = 0
+            self.texture = self.walk_textures[self.current_texture]
+
+
+class Boss(arcade.Sprite):
+    """Мини-босс с уникальными механиками"""
+    
+    def __init__(self, x, y, boss_type=1, base_hp=1):
+        super().__init__()
+        self.boss_type = boss_type
+        self.center_x = x
+        self.center_y = y
+        self.speed = 80  # Медленнее обычных врагов
+        
+        # HP в 30 раз больше базового HP врагов
+        self.max_hp = base_hp * 30
+        self.hp = self.max_hp
+        
+        # Визуальные параметры
+        self.base_size = 80  # Большой размер
+        self.pulse_timer = 0
+        self.pulse_speed = 2.0
+        
+        # Атаки
+        self.attack_timer = 0
+        self.attack_cooldown = 3.5  # 3-4 секунды между атаками
+        
+        # Орбиты для первого босса
+        self.orbit_angle = 0
+        self.orbit_speed = 2.5  # Скорость вращения орбит
+        self.num_orbs = 4 if boss_type == 1 else 0
+        self.orb_distance = 100  # Расстояние орбит от центра
+        
+        # Для второго босса - телепортация
+        self.teleport_timer = 0
+        self.teleport_cooldown = 8.0  # Телепортируется каждые 8 секунд
+        self.is_teleporting = False
+        self.teleport_flash = 0
+        
+        # Цвета для разных боссов
+        if boss_type == 1:
+            self.color = (200, 50, 50)  # Красный - "Страж"
+            self.name = "СТРАЖ ОРБИТ"
+        else:
+            self.color = (50, 50, 200)  # Синий - "Снайпер"  
+            self.name = "АСТРАЛЬНЫЙ СТРЕЛОК"
+            self.attack_cooldown = 3.0
+        
+        # Эффект появления
+        self.spawn_timer = 2.0  # 2 секунды анимации появления
+        self.is_spawning = True
+        
+    def update(self, delta_time, player, wall_list):
+        """Обновление босса"""
+        # Анимация появления
+        if self.is_spawning:
+            self.spawn_timer -= delta_time
+            if self.spawn_timer <= 0:
+                self.is_spawning = False
+            return
+        
+        # Пульсация размера
+        self.pulse_timer += delta_time * self.pulse_speed
+        pulse = 1.0 + 0.1 * math.sin(self.pulse_timer)
+        
+        # Движение к игроку
+        dx = player.center_x - self.center_x
+        dy = player.center_y - self.center_y
+        distance = math.sqrt(dx**2 + dy**2)
+        
+        if distance > 0:
+            dx /= distance
+            dy /= distance
+            
+            old_x, old_y = self.center_x, self.center_y
+            self.center_x += dx * self.speed * delta_time
+            self.center_y += dy * self.speed * delta_time
+            
+            # Ломаем стены на пути
+            hit_walls = arcade.check_for_collision_with_list(self, wall_list)
+            for wall in hit_walls:
+                wall.remove_from_sprite_lists()
+        
+        # Вращение орбит для первого босса
+        if self.boss_type == 1:
+            self.orbit_angle += self.orbit_speed * delta_time
+        
+        # Телепортация для второго босса
+        if self.boss_type == 2:
+            self.teleport_timer += delta_time
+            if self.teleport_timer >= self.teleport_cooldown:
+                self.teleport_timer = 0
+                self.is_teleporting = True
+                self.teleport_flash = 0.5
+        
+        # Таймер атаки
+        self.attack_timer += delta_time
+        
+    def get_orb_positions(self):
+        """Возвращает позиции орбит для первого босса"""
+        positions = []
+        for i in range(self.num_orbs):
+            angle = self.orbit_angle + (2 * math.pi * i / self.num_orbs)
+            ox = self.center_x + math.cos(angle) * self.orb_distance
+            oy = self.center_y + math.sin(angle) * self.orb_distance
+            positions.append((ox, oy))
+        return positions
+    
+    def should_attack(self):
+        """Проверяет, нужно ли атаковать"""
+        if self.attack_timer >= self.attack_cooldown:
+            self.attack_timer = 0
+            return True
+        return False
+
+
+class BossProjectile(arcade.Sprite):
+    """Снаряд босса"""
+    
+    def __init__(self, start_x, start_y, target_x, target_y, speed=300):
+        super().__init__()
+        self.center_x = start_x
+        self.center_y = start_y
+        self.start_x = start_x
+        self.start_y = start_y
+        self.speed = speed
+        self.max_distance = 2000
+        self.size = 20
+        self.color = (255, 100, 100)
+        self.pulse_timer = 0
+        
+        # Направление
+        dx = target_x - start_x
+        dy = target_y - start_y
+        dist = math.sqrt(dx**2 + dy**2)
+        if dist > 0:
+            self.change_x = (dx / dist) * speed
+            self.change_y = (dy / dist) * speed
+        else:
+            self.change_x = speed
+            self.change_y = 0
+            
+    def update(self, delta_time):
+        self.center_x += self.change_x * delta_time
+        self.center_y += self.change_y * delta_time
+        self.pulse_timer += delta_time * 5
+        
+        # Удаляем если улетел далеко
+        dist = math.sqrt((self.center_x - self.start_x)**2 + (self.center_y - self.start_y)**2)
+        if dist > self.max_distance:
+            self.remove_from_sprite_lists()
