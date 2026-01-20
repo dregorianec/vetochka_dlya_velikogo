@@ -114,7 +114,7 @@ class MyGame(arcade.Window):
         self.game_started = False
         
         # Игровое время и прогрессия
-        self.game_time = 0  # Время игры в секундах
+        self.game_time = 0  # Время игры в секундах (4:30 для теста)
         self.game_won = False  # Победа
         self.last_minute = 0  # Последняя засчитанная минута (для увеличения опыта)
         self.xp_per_kill = 1  # Базовый опыт за убийство
@@ -895,7 +895,8 @@ class MyGame(arcade.Window):
             
             # Тело босса
             size = int(boss.base_size * scale)
-            boss_sprite = arcade.SpriteSolidColor(size, size, color=(*boss.color, alpha))
+            boss_color = (boss.color[0], boss.color[1], boss.color[2], alpha)
+            boss_sprite = arcade.SpriteSolidColor(size, size, color=boss_color)
             boss_sprite.center_x = boss.center_x
             boss_sprite.center_y = boss.center_y
             boss_sprite.angle = boss.pulse_timer * 10  # Медленное вращение
@@ -1016,13 +1017,13 @@ class MyGame(arcade.Window):
             if fill_width > 0:
                 # Цвет зависит от HP
                 if hp_ratio > 0.5:
-                    hp_color = boss.color
+                    hp_color = (boss.color[0], boss.color[1], boss.color[2], 255)
                 elif hp_ratio > 0.25:
-                    hp_color = (255, 150, 50)
+                    hp_color = (255, 150, 50, 255)
                 else:
-                    hp_color = (255, 50, 50)
+                    hp_color = (255, 50, 50, 255)
                 
-                fill = arcade.SpriteSolidColor(fill_width, bar_height, color=(*hp_color, 255))
+                fill = arcade.SpriteSolidColor(fill_width, bar_height, color=hp_color)
                 fill.center_x = bar_x - (bar_width - fill_width) // 2
                 fill.center_y = bar_y
                 fill_list = arcade.SpriteList()
